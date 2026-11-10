@@ -119,7 +119,7 @@ export function LoginForm({
             <img src={captchaSrc} alt="Kode CAPTCHA" width={132} height={48} className="shrink-0 rounded" />
             <div className="min-w-0">
               <p className="text-xs font-semibold text-ink">Masukkan kode di atas</p>
-              <p className="text-xs leading-snug text-muted">Gunakan huruf besar dan kecil sesuai gambar.</p>
+              <p className="text-xs leading-snug text-muted">Huruf besar atau kecil sama saja.</p>
             </div>
           </div>
           <div className="flex gap-2">

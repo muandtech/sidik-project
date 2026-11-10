@@ -30,7 +30,10 @@ INSERT INTO pengaturan (kunci, nilai, keterangan) VALUES
   ('cicilan_maks_termin',    '6', 'Jumlah termin maksimal saat Admin Keuangan memecah tagihan menjadi cicilan bulanan (FR-KEU-08)'),
   ('metode_bayar_manual',    'Transfer Manual,Tunai di Loket Keuangan,Virtual Account', 'Pilihan metode bayar saat verifikasi manual, dipisah koma'),
   ('sesi_durasi_jam',        '8', 'Masa berlaku session tanpa "Ingat Saya" (jam)'),
-  ('sesi_ingat_saya_hari',   '30', 'Masa berlaku session dengan "Ingat Saya" (hari)');
+  ('sesi_ingat_saya_hari',   '30', 'Masa berlaku session dengan "Ingat Saya" (hari)'),
+  ('login_maks_gagal_akun',  '5', 'Batas login gagal per akun dalam jendela waktu; lewat batas → akun dikunci sementara (NFR-04)'),
+  ('login_maks_gagal_ip',    '100', 'Batas login gagal per IP dalam jendela waktu; dibuat longgar karena mahasiswa di Wi-Fi kampus berbagi satu IP'),
+  ('login_jendela_menit',    '15', 'Jendela waktu penghitungan login gagal sekaligus lama penguncian (menit)');
 
 INSERT INTO fitur (slug, nama, deskripsi, status, rute, rencana_sprint) VALUES
   -- Fitur yang sudah tersedia di Sprint 1

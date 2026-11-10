@@ -30,7 +30,7 @@ export default async function KelolaTagihanPage({ params }: PageProps<"/admin-ke
 
   const [termin, riwayat, pengaturan] = await Promise.all([
     getTerminTagihan(tagihan.id),
-    getRiwayatTagihan(tagihan.no_tagihan),
+    getRiwayatTagihan(tagihan),
     getPengaturan(),
   ]);
   const now = new Date();
