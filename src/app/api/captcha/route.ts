@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { CAPTCHA_COOKIE, CAPTCHA_TTL_SECONDS, createCaptcha, renderCaptchaSvg } from "@/lib/captcha";
+import { CAPTCHA_COOKIE, CAPTCHA_TTL_SECONDS, createCaptcha } from "@/lib/captcha";
+import { renderCaptchaSvg } from "@/lib/captcha-glyph";
 
 export async function GET() {
   const { code, token } = createCaptcha();

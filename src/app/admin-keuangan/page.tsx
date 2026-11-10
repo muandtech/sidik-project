@@ -1,10 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { StatusBadge, statusTagihan, statusTermin, type KodeStatus } from "@/components/keuangan/status";
+import { StatusBadge, statusTagihan, statusTermin } from "@/components/keuangan/status";
 import { Card, CardHeader, EmptyState, PageHeader } from "@/components/ui";
-import { formatBulan, formatRupiah, formatTanggal, kunciBulan, lewatJatuhTempo } from "@/lib/format";
-import { getPeriodeTagihan, getRekapTagihan, kodePeriode, type RekapBaris } from "@/lib/keuangan";
+import { formatBulan, formatRupiah, formatTanggal, kunciBulan, tanggalHariIniWib } from "@/lib/format";
+import {
+  getBulanRekap,
+  getPeriodeTagihan,
+  getRekapTagihan,
+  getRingkasanPeriode,
+  kodePeriode,
+  REKAP_PER_HALAMAN,
+  type FilterRekap,
+} from "@/lib/keuangan";
 import { requireUser } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Rekap Pembayaran" };
@@ -19,13 +27,8 @@ function satu(value: string | string[] | undefined) {
   return (Array.isArray(value) ? value[0] : value) ?? "";
 }
 
-/** Status pembayaran baris pada bulan tertentu; null bila baris tidak punya kewajiban di bulan itu. */
-function statusBulan(row: RekapBaris, bulan: string, now: Date): KodeStatus | null {
-  if (row.termin.length === 0) {
-    return kunciBulan(row.jatuh_tempo) === bulan || row.status === "lunas" ? statusTagihan(row, [], now) : null;
-  }
-  const termin = row.termin.find((t) => kunciBulan(t.jatuh_tempo) === bulan);
-  return termin ? statusTermin(termin, now) : null;
+function bacaStatus(value: string): FilterRekap["status"] {
+  return value === "lunas" || value === "belum" ? value : "";
 }
 
 export default async function RekapPembayaranPage({ searchParams }: PageProps<"/admin-keuangan">) {
@@ -44,33 +47,38 @@ export default async function RekapPembayaranPage({ searchParams }: PageProps<"/
   }
 
   const now = new Date();
-  const semua = await getRekapTagihan(periode);
-  const daftarBulan = [...new Set(semua.flatMap((r) => r.termin.map((t) => kunciBulan(t.jatuh_tempo))))].sort();
+  const [daftarBulan, ringkasanPeriode] = await Promise.all([
+    getBulanRekap(periode),
+    getRingkasanPeriode(periode, tanggalHariIniWib(now)),
+  ]);
   const bulan = daftarBulan.includes(satu(params.bulan)) ? satu(params.bulan) : "";
-  const filterStatus = FILTER_STATUS.some((f) => f.value === satu(params.status)) ? satu(params.status) : "";
-  const q = satu(params.q).trim().toLowerCase();
+  const filterStatus = bacaStatus(satu(params.status));
+  const q = satu(params.q).trim().slice(0, 100);
+  const halamanDiminta = Number(satu(params.halaman));
 
-  const baris = semua.filter((row) => {
-    if (q && !row.nama.toLowerCase().includes(q) && !row.nim.includes(q)) return false;
-    if (!filterStatus) return true;
-    const status = bulan ? statusBulan(row, bulan, now) : statusTagihan(row, row.termin, now);
-    if (status === null) return false;
-    return filterStatus === "lunas" ? status === "lunas" : status !== "lunas";
+  // Filter & paginasi dijalankan di database (Guide §4.2 B); ringkasan dihitung dari seluruh periode.
+  const { baris, totalBaris, halaman, jumlahHalaman } = await getRekapTagihan(periode, {
+    q,
+    status: filterStatus,
+    bulan,
+    halaman: Number.isInteger(halamanDiminta) ? halamanDiminta : 1,
   });
+  const { total, diterima, tunggakan, jumlahLunas, jumlahTagihan } = ringkasanPeriode;
 
-  // Ringkasan dihitung dari seluruh tagihan periode, tidak terpengaruh filter.
-  const total = semua.reduce((n, r) => n + Number(r.jumlah), 0);
-  const diterima = semua.reduce((n, r) => n + Number(r.dibayar), 0);
-  const tunggakan = semua.reduce((n, r) => {
-    if (r.termin.length === 0) {
-      return r.status !== "lunas" && lewatJatuhTempo(r.jatuh_tempo, now) ? n + Number(r.jumlah) - Number(r.dibayar) : n;
-    }
-    return n + r.termin.filter((t) => statusTermin(t, now) === "menunggak").reduce((m, t) => m + Number(t.jumlah), 0);
-  }, 0);
-  const jumlahLunas = semua.filter((r) => r.status === "lunas").length;
+  /** URL halaman lain dengan filter yang sama. */
+  const urlHalaman = (n: number) => {
+    const sp = new URLSearchParams({ periode: kodePeriode(periode) });
+    if (bulan) sp.set("bulan", bulan);
+    if (filterStatus) sp.set("status", filterStatus);
+    if (q) sp.set("q", q);
+    if (n > 1) sp.set("halaman", String(n));
+    return `/admin-keuangan?${sp.toString()}`;
+  };
+  const awal = totalBaris === 0 ? 0 : (halaman - 1) * REKAP_PER_HALAMAN + 1;
+  const akhir = Math.min(halaman * REKAP_PER_HALAMAN, totalBaris);
 
   const ringkasan = [
-    { label: "Total Tagihan", value: formatRupiah(total), note: `${semua.length} mahasiswa`, noteClass: "text-brand" },
+    { label: "Total Tagihan", value: formatRupiah(total), note: `${jumlahTagihan} mahasiswa`, noteClass: "text-brand" },
     { label: "Sudah Diterima", value: formatRupiah(diterima), note: `${jumlahLunas} lunas penuh`, noteClass: "text-success" },
     { label: "Belum Diterima", value: formatRupiah(total - diterima), note: "Termasuk cicilan belum jatuh tempo", noteClass: "text-muted" },
     { label: "Menunggak", value: formatRupiah(tunggakan), note: "Lewat jatuh tempo", noteClass: "text-danger" },
@@ -132,7 +140,7 @@ export default async function RekapPembayaranPage({ searchParams }: PageProps<"/
           </div>
           <div>
             <label htmlFor="q" className="mb-1 block text-xs font-medium text-muted">Cari mahasiswa</label>
-            <input id="q" name="q" defaultValue={satu(params.q)} placeholder="Nama atau NIM" className={selectClass} />
+            <input id="q" name="q" defaultValue={q} placeholder="Nama atau NIM" className={selectClass} />
           </div>
           <div className="flex items-end gap-2">
             <button
@@ -149,7 +157,7 @@ export default async function RekapPembayaranPage({ searchParams }: PageProps<"/
 
         <CardHeader
           title={bulan ? `Pembayaran ${formatBulan(`${bulan}-01`)}` : "Pembayaran Per Bulan"}
-          action={<span className="text-xs text-muted">{baris.length} dari {semua.length} mahasiswa</span>}
+          action={<span className="text-xs text-muted">{awal}–{akhir} dari {totalBaris} mahasiswa</span>}
         />
         <div className="p-4 pt-2 sm:p-5 sm:pt-2">
           {baris.length === 0 ? (
@@ -232,6 +240,27 @@ export default async function RekapPembayaranPage({ searchParams }: PageProps<"/
                 </tbody>
               </table>
             </div>
+          )}
+          {jumlahHalaman > 1 && (
+            <nav aria-label="Halaman rekap" className="mt-3 flex items-center justify-between gap-3 text-[13px]">
+              {halaman > 1 ? (
+                <Link href={urlHalaman(halaman - 1)} className="rounded-md border border-line px-3 py-1.5 font-semibold hover:bg-canvas">
+                  ‹ Sebelumnya
+                </Link>
+              ) : (
+                <span />
+              )}
+              <span className="text-muted">
+                Halaman {halaman} dari {jumlahHalaman}
+              </span>
+              {halaman < jumlahHalaman ? (
+                <Link href={urlHalaman(halaman + 1)} className="rounded-md border border-line px-3 py-1.5 font-semibold hover:bg-canvas">
+                  Berikutnya ›
+                </Link>
+              ) : (
+                <span />
+              )}
+            </nav>
           )}
           <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted">
             <span className="flex items-center gap-1.5"><StatusBadge status="lunas" /> sudah di-ACC</span>

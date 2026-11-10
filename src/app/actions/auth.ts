@@ -6,9 +6,10 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { catatAudit as audit } from "@/lib/audit";
 import { db, queryOne } from "@/lib/db";
-import { CAPTCHA_COOKIE, verifyCaptcha } from "@/lib/captcha";
+import { catatLoginGagal, getAturanBatasLogin, resetLoginGagal, sisaKunciLogin } from "@/lib/batas-login";
+import { CAPTCHA_COOKIE, verifikasiCaptcha } from "@/lib/captcha";
 import { getPengaturan } from "@/lib/konfigurasi";
-import { createSession, deleteSession, getSessionUser, homeFor, type Role } from "@/lib/session";
+import { createSession, deleteSession, getClientInfo, getSessionUser, homeFor, type Role } from "@/lib/session";
 
 export type LoginState = {
   message?: string;
@@ -39,11 +40,26 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     return { errors, identifier, attempt: Date.now() };
   }
 
-  // CAPTCHA hanya berlaku untuk satu kali percobaan.
   const cookieStore = await cookies();
   const captchaToken = cookieStore.get(CAPTCHA_COOKIE)?.value;
   cookieStore.delete(CAPTCHA_COOKIE);
-  if (!verifyCaptcha(captcha, captchaToken)) {
+
+  // NFR-04: tolak lebih dulu bila akun/IP sedang dikunci karena terlalu banyak percobaan gagal.
+  const { ip } = await getClientInfo();
+  const sisaKunci = await sisaKunciLogin(identifier, ip, await getAturanBatasLogin());
+  if (sisaKunci > 0) {
+    await audit(null, "login_diblokir", `identifier: ${identifier.slice(0, 60)}`);
+    return {
+      message: `Terlalu banyak percobaan masuk yang gagal. Silakan coba lagi dalam ${sisaKunci} menit.`,
+      identifier,
+      attempt: Date.now(),
+    };
+  }
+
+  // CAPTCHA hanya berlaku untuk satu kali percobaan (token dicatat di server, tidak bisa dipakai ulang).
+  if (!(await verifikasiCaptcha(captcha, captchaToken))) {
+    // Salah ketik CAPTCHA hanya dihitung per IP agar tidak mengunci akun pemilik yang sah.
+    await catatLoginGagal(null, ip);
     return {
       errors: { captcha: "Kode CAPTCHA tidak sesuai atau sudah kedaluwarsa. Silakan coba lagi." },
       identifier,
@@ -58,6 +74,8 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   const passwordValid = await bcrypt.compare(password, user?.password_hash ?? (await getDummyHash()));
 
   if (!user || !passwordValid) {
+    // Dicatat juga untuk identifier yang tidak terdaftar agar penguncian tidak membocorkan akun mana yang ada.
+    await catatLoginGagal(identifier, ip);
     await audit(user?.id ?? null, "login_gagal", `identifier: ${identifier.slice(0, 60)}`);
     return { message: "NIM/Username atau password salah.", identifier, attempt: Date.now() };
   }
@@ -71,6 +89,7 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     };
   }
 
+  await resetLoginGagal(identifier);
   await createSession(user.id, remember);
   await db.execute("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
   await audit(user.id, "login_sukses");

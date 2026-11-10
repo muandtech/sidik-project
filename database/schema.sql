@@ -12,7 +12,7 @@ SET time_zone = '+07:00';
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS menu, fitur, pengaturan, tagihan_termin, tagihan, aktivitas, notifikasi, pengumuman,
   kategori_pengumuman, jadwal_kuliah, dokumen_mahasiswa, orang_tua_wali, mahasiswa, dosen,
-  prodi, fakultas, audit_log, sessions, users;
+  prodi, fakultas, audit_log, sessions, users, login_gagal, captcha_terpakai;
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ---------------------------------------------------------------------
@@ -80,16 +80,51 @@ CREATE TABLE sessions (
   CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Jejak audit (NFR-07). Perubahan data penting menyimpan objek yang diubah (entitas, entitas_id) beserta
+-- nilai sebelum/sesudah dan alasan (BR-SD-07/10). Baris tidak dapat diubah atau dihapus (trigger di bawah).
 CREATE TABLE audit_log (
   id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id     INT UNSIGNED NULL,
   aksi        VARCHAR(50)  NOT NULL COMMENT 'login_sukses, login_gagal, logout, tagihan_*',
   keterangan  VARCHAR(255) NULL,
+  entitas     VARCHAR(30)  NULL COMMENT 'Jenis objek yang diubah, mis. tagihan',
+  entitas_id  INT UNSIGNED NULL,
+  data_lama   JSON         NULL,
+  data_baru   JSON         NULL,
+  alasan      VARCHAR(255) NULL,
   ip_address  VARCHAR(45)  NULL,
   user_agent  VARCHAR(255) NULL,
   created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_audit_user (user_id),
+  INDEX idx_audit_entitas (entitas, entitas_id, created_at),
+  INDEX idx_audit_aksi (aksi, created_at),
   CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Audit log hanya boleh ditambah (append-only), termasuk bila aplikasi terhubung dengan akun DB berhak penuh.
+-- Pengarsipan oleh DBA: DROP TRIGGER, arsipkan, lalu buat kembali trigger ini.
+CREATE TRIGGER audit_log_tolak_ubah BEFORE UPDATE ON audit_log FOR EACH ROW
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log tidak boleh diubah';
+CREATE TRIGGER audit_log_tolak_hapus BEFORE DELETE ON audit_log FOR EACH ROW
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log tidak boleh dihapus';
+
+-- Percobaan login gagal untuk rate limiting (NFR-04). Batas diatur di tabel pengaturan (login_*).
+-- identifier NULL = gagal CAPTCHA, hanya dihitung per IP. Baris > 1 hari dihapus otomatis.
+CREATE TABLE login_gagal (
+  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  identifier  VARCHAR(120) NULL COMMENT 'NIM/username/email dalam huruf kecil',
+  ip_address  VARCHAR(45)  NULL,
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_login_gagal_identifier (identifier, created_at),
+  INDEX idx_login_gagal_ip (ip_address, created_at),
+  INDEX idx_login_gagal_waktu (created_at)
+) ENGINE=InnoDB;
+
+-- Token CAPTCHA yang sudah dipakai, agar satu token hanya berlaku untuk satu percobaan login (anti-replay).
+CREATE TABLE captcha_terpakai (
+  nonce           VARCHAR(32) PRIMARY KEY,
+  kedaluwarsa_at  DATETIME    NOT NULL,
+  INDEX idx_captcha_kedaluwarsa (kedaluwarsa_at)
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------
@@ -258,6 +293,7 @@ CREATE TABLE tagihan (
   metode_bayar      VARCHAR(40) NULL,
   no_kuitansi       VARCHAR(30) NULL UNIQUE,
   UNIQUE KEY uq_tagihan_semester (mahasiswa_id, semester_ke),
+  INDEX idx_tagihan_periode (tahun_akademik, periode),
   CONSTRAINT fk_tagihan_mhs FOREIGN KEY (mahasiswa_id) REFERENCES mahasiswa(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 

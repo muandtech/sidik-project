@@ -22,6 +22,30 @@ dibangun dengan Next.js 16 (App Router) + MySQL/MariaDB (XAMPP).
    npm run dev      # http://localhost:3000
    ```
 
+### Database yang sudah berjalan (migrasi)
+
+Bila database sudah dibuat sebelum suatu perubahan skema, jalankan berkas migrasi baru tanpa menghapus data:
+
+```bash
+node --env-file-if-exists=.env.local scripts/db.mjs migrations/0001_keamanan_login
+node --env-file-if-exists=.env.local scripts/db.mjs migrations/0002_audit_terstruktur
+```
+
+Tabel `audit_log` bersifat append-only (trigger menolak `UPDATE`/`DELETE`). Untuk mengosongkannya di
+development, jalankan ulang `npm run db:setup`.
+
+### Test
+
+```bash
+npm test          # sekali jalan
+npm run test:watch
+```
+
+Cakupan saat ini: login (CAPTCHA, rate limiting, IP), dan keuangan (cicilan, ACC/koreksi, ACC ganda bersamaan,
+hak akses action, audit log, rekap + paginasi). Test integrasi memakai database **terpisah** `sidik_test` (dibuat ulang otomatis dari `schema.sql` +
+`data-master.sql` setiap kali test dijalankan) dengan koneksi MySQL dari `.env.local`. MySQL harus menyala.
+Nama database bisa diganti lewat `DB_TEST_NAME`, tetapi wajib berakhiran `_test`.
+
 ### Akun demo (hanya bila `data-demo.sql` diimport; password: `password123`)
 
 | Akun | Login | Keterangan |
@@ -33,7 +57,9 @@ dibangun dengan Next.js 16 (App Router) + MySQL/MariaDB (XAMPP).
 | Dosen | `0412345678` | Diarahkan ke placeholder *Modul Dosen & Admin* (Sprint 2) |
 | Admin Keuangan | `keuangan` atau `keuangan@iais.ac.id` | Portal Admin Keuangan `/admin-keuangan`: rekap per bulan, ACC/koreksi pembayaran |
 
-CAPTCHA peka huruf besar/kecil. Untuk produksi, jangan import `data-demo.sql`; isi tabel dengan data asli kampus
+CAPTCHA tidak peka huruf besar/kecil dan hanya berlaku untuk satu percobaan. Setelah 5 kali gagal dalam 15 menit
+akun dikunci sementara (atur di tabel `pengaturan`: `login_maks_gagal_akun`, `login_maks_gagal_ip`,
+`login_jendela_menit`); untuk membuka kunci saat development: `DELETE FROM login_gagal;`. Untuk produksi, jangan import `data-demo.sql`; isi tabel dengan data asli kampus
 (password disimpan sebagai hash bcrypt).
 
 ## Semua data dari database
@@ -56,7 +82,7 @@ Yang tetap di kode hanyalah teks antarmuka (judul kolom, label field, pesan vali
 
 | Backlog | Implementasi |
 | --- | --- |
-| S1-07/08/10/16 Login, session, logout | `/login`, server action `src/app/actions/auth.ts`, session di tabel `sessions` (token acak, disimpan sebagai hash SHA-256, cookie httpOnly), CAPTCHA bertanda tangan HMAC, "Ingat Saya" (durasi diatur di tabel `pengaturan`), audit login/logout di `audit_log` |
+| S1-07/08/10/16 Login, session, logout | `/login`, server action `src/app/actions/auth.ts`, session di tabel `sessions` (token acak, disimpan sebagai hash SHA-256, cookie httpOnly), CAPTCHA bergambar garis dengan token HMAC sekali pakai (`captcha_terpakai`), rate limiting login per akun & IP (`login_gagal`, `src/lib/batas-login.ts`), "Ingat Saya" (durasi diatur di tabel `pengaturan`), audit login/logout di `audit_log` |
 | S1-01/12 Dashboard & ringkasan identitas | `/dashboard` — NIM, nama, prodi, semester, dosen PA, agenda hari ini, tindakan penting (notifikasi), pengumuman terbaru, aktivitas, shortcut |
 | S1-02/15 Profil | `/biodata` — data pribadi, akademik, kontak, orang tua/wali, dokumen, foto (fallback inisial) |
 | S1-06/11 Pengumuman | `/pengumuman` (filter Akademik / Informasi Kampus / Agenda) dan `/pengumuman/[id]` |
@@ -64,7 +90,7 @@ Yang tetap di kode hanyalah teks antarmuka (judul kolom, label field, pesan vali
 | S1-13 + S1-CS1..5 Coming Soon | Template reusable `src/components/coming-soon.tsx`, rute `/coming-soon/[slug]`, isi dari tabel `fitur` |
 | S1-14 Responsif | Drawer sidebar di mobile, menu atas dapat digeser, diuji hingga lebar 360 px |
 | Tagihan & Keuangan (sesuai desain UI) | `/keuangan` + cicilan per bulan, kuitansi siap cetak `/keuangan/kuitansi/[id]` dan per termin `/keuangan/kuitansi/termin/[id]` |
-| Simulasi pembayaran manual (PRD 6.4.1) | `/admin-keuangan`: rekap mahasiswa × bulan dengan filter periode/bulan/status; `/admin-keuangan/tagihan/[id]`: ACC lunas, koreksi dengan alasan, pecah/gabung cicilan, riwayat dari `audit_log`. Server action di `src/app/actions/keuangan.ts` |
+| Simulasi pembayaran manual (PRD 6.4.1) | `/admin-keuangan`: rekap mahasiswa × bulan dengan filter periode/bulan/status (filter & paginasi di database, 50 baris per halaman); `/admin-keuangan/tagihan/[id]`: ACC lunas, koreksi dengan alasan, pecah/gabung cicilan, riwayat dari `audit_log` (nilai sebelum/sesudah). Logika di `src/lib/keuangan-aksi.ts`, server action tipis di `src/app/actions/keuangan.ts` |
 
 Semua menu lain (KRS, Nilai, Layanan Surat, E-Learning, KKN, Sidang, dll.) mengarah ke halaman Coming Soon
 karena status fiturnya `segera` di tabel `fitur`.
@@ -75,7 +101,9 @@ karena status fiturnya `segera` di tabel `fitur`.
 database/schema.sql          struktur tabel
 database/data-master.sql     pengaturan, fitur, menu, kategori (wajib)
 database/data-demo.sql       data contoh (opsional)
+database/migrations/         perubahan skema untuk database yang sudah berjalan
 scripts/db.mjs               npm run db:setup / db:demo
+tests/                       test Vitest (tests/support: setup database sidik_test)
 src/proxy.ts                 redirect cepat ke /login bila tidak ada cookie session
 src/lib/                     db pool, session, captcha, query data & konfigurasi, format
 src/app/(portal)/            halaman yang membutuhkan login (layout = header, menu, sidebar)

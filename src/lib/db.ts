@@ -35,6 +35,12 @@ export async function queryOne<T>(sql: string, params: unknown[] = []): Promise<
   return rows[0] ?? null;
 }
 
+/** Seperti `query`, tetapi memakai koneksi transaksi yang sedang berjalan (mis. untuk `SELECT … FOR UPDATE`). */
+export async function queryDalam<T>(conn: PoolConnection, sql: string, params: unknown[] = []): Promise<T[]> {
+  const [rows] = await conn.query<RowDataPacket[]>(sql, params);
+  return rows as T[];
+}
+
 /** Menjalankan `fn` dalam satu transaksi; rollback otomatis bila terjadi error. */
 export async function withTransaction<T>(fn: (conn: PoolConnection) => Promise<T>): Promise<T> {
   const conn = await db.getConnection();

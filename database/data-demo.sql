@@ -155,13 +155,13 @@ INSERT INTO tagihan_termin (id, tagihan_id, termin_ke, jumlah, jatuh_tempo, stat
   (11, 7, 5, 1200000, '2027-01-15', 'belum_bayar', NULL, NULL, NULL, NULL, NULL, NULL),
   (12, 7, 6, 1200000, '2027-02-15', 'belum_bayar', NULL, NULL, NULL, NULL, NULL, NULL);
 
--- Jejak verifikasi (format keterangan: "<no_tagihan> | <uraian>", dibaca halaman riwayat Admin Keuangan)
-INSERT INTO audit_log (user_id, aksi, keterangan, created_at) VALUES
-  (4, 'tagihan_cicilan',    'TGH-20261-0102523026 | Dipecah menjadi 6 termin bulanan', '2026-08-20 10:00:00'),
-  (4, 'tagihan_cicilan',    'TGH-20261-0102523027 | Dipecah menjadi 6 termin bulanan', '2026-08-20 10:05:00'),
-  (4, 'tagihan_verifikasi', 'TGH-20261-0102523027 | Termin 1 (September 2026) di-ACC lunas · Tunai di Loket Keuangan', '2026-09-05 09:31:00'),
-  (4, 'tagihan_verifikasi', 'TGH-20261-0102523026 | Termin 1 (September 2026) di-ACC lunas · Transfer Manual', '2026-09-10 14:02:00'),
-  (4, 'tagihan_verifikasi', 'TGH-20261-0102523027 | Termin 2 (Oktober 2026) di-ACC lunas · Transfer Manual', '2026-10-13 08:20:00');
+-- Jejak verifikasi (keterangan "<no_tagihan> | <uraian>"; riwayat Admin Keuangan dibaca lewat entitas + entitas_id)
+INSERT INTO audit_log (user_id, aksi, keterangan, entitas, entitas_id, created_at) VALUES
+  (4, 'tagihan_cicilan',    'TGH-20261-0102523026 | Dipecah menjadi 6 termin bulanan', 'tagihan', 6, '2026-08-20 10:00:00'),
+  (4, 'tagihan_cicilan',    'TGH-20261-0102523027 | Dipecah menjadi 6 termin bulanan', 'tagihan', 7, '2026-08-20 10:05:00'),
+  (4, 'tagihan_verifikasi', 'TGH-20261-0102523027 | Termin 1 (September 2026) di-ACC lunas · Tunai di Loket Keuangan', 'tagihan', 7, '2026-09-05 09:31:00'),
+  (4, 'tagihan_verifikasi', 'TGH-20261-0102523026 | Termin 1 (September 2026) di-ACC lunas · Transfer Manual', 'tagihan', 6, '2026-09-10 14:02:00'),
+  (4, 'tagihan_verifikasi', 'TGH-20261-0102523027 | Termin 2 (Oktober 2026) di-ACC lunas · Transfer Manual', 'tagihan', 7, '2026-10-13 08:20:00');
 
 INSERT INTO notifikasi (user_id, judul, pesan, tipe, tautan, created_at) VALUES
   (3, 'Cicilan UKT Oktober 2026 Lewat Jatuh Tempo', 'Segera lakukan pembayaran termin 2', 'peringatan', '/keuangan', NOW() - INTERVAL 1 DAY);

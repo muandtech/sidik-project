@@ -30,11 +30,22 @@ function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
+/**
+ * IP klien dari header reverse proxy. Header ini bisa diisi bebas oleh klien, sehingga hanya dipercaya
+ * bila aplikasi berada di belakang Nginx/Caddy yang menimpanya (TRUST_PROXY=true). Tanpa itu IP = null
+ * dan rate limiting hanya berjalan per akun (temuan audit S2).
+ */
+export function ipDariHeader(h: Pick<Headers, "get">, trustProxy = process.env.TRUST_PROXY === "true") {
+  if (!trustProxy) return null;
+  // X-Real-IP diisi proxy dengan $remote_addr; entri terakhir X-Forwarded-For ditambahkan oleh proxy itu sendiri.
+  const ip = h.get("x-real-ip")?.trim() || h.get("x-forwarded-for")?.split(",").at(-1)?.trim();
+  return ip ? ip.slice(0, 45) : null;
+}
+
 export async function getClientInfo() {
   const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? h.get("x-real-ip") ?? null;
   const userAgent = h.get("user-agent")?.slice(0, 255) ?? null;
-  return { ip, userAgent };
+  return { ip: ipDariHeader(h), userAgent };
 }
 
 export async function createSession(userId: number, remember: boolean) {
