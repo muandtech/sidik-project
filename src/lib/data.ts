@@ -1,15 +1,18 @@
 import "server-only";
 import { cache } from "react";
 import { query, queryOne } from "@/lib/db";
-import type { Role } from "@/lib/session";
+import type { Role } from "@/lib/peran";
 
 export type Mahasiswa = {
   id: number;
   nim: string;
   nama: string;
+  prodi_id: number;
   angkatan: number;
   semester: number;
-  status_akademik: string;
+  status_akademik: "aktif" | "cuti" | "nonaktif" | "lulus" | "keluar";
+  boleh_krs: number;
+  dosen_pa_id: number | null;
   tempat_lahir: string | null;
   tanggal_lahir: string | null;
   jenis_kelamin: "L" | "P" | null;
@@ -21,8 +24,6 @@ export type Mahasiswa = {
   alamat_ktp: string | null;
   alamat_domisili: string | null;
   foto: string | null;
-  total_sks: number;
-  ipk: string | null;
   nilai_tilawah: string | null;
   prodi: string;
   jenjang: string;
@@ -32,10 +33,10 @@ export type Mahasiswa = {
 
 export const getMahasiswa = cache(async (userId: number) =>
   queryOne<Mahasiswa>(
-    `SELECT m.id, m.nim, m.nama, m.angkatan, m.semester, m.status_akademik,
+    `SELECT m.id, m.nim, m.nama, m.prodi_id, m.angkatan, m.semester, m.status_akademik, m.boleh_krs, m.dosen_pa_id,
             m.tempat_lahir, m.tanggal_lahir, m.jenis_kelamin, m.agama, m.kewarganegaraan,
             m.golongan_darah, m.no_hp, m.email_kampus, m.alamat_ktp, m.alamat_domisili,
-            m.foto, m.total_sks, m.ipk, m.nilai_tilawah,
+            m.foto, m.nilai_tilawah,
             p.nama AS prodi, p.jenjang, f.nama AS fakultas, d.nama AS dosen_pa
        FROM mahasiswa m
        JOIN prodi p ON p.id = m.prodi_id
@@ -71,26 +72,6 @@ export function getDokumen(mahasiswaId: number) {
   return query<Dokumen>(
     "SELECT id, jenis, ukuran_kb, status FROM dokumen_mahasiswa WHERE mahasiswa_id = ? ORDER BY urutan, id",
     [mahasiswaId],
-  );
-}
-
-export type Jadwal = {
-  id: number;
-  nama_mk: string;
-  ruang: string;
-  jam_mulai: string;
-  jam_selesai: string;
-  dosen: string | null;
-};
-
-export function getJadwalHari(mahasiswaId: number, hari: number) {
-  return query<Jadwal>(
-    `SELECT j.id, j.nama_mk, j.ruang, j.jam_mulai, j.jam_selesai, d.nama AS dosen
-       FROM jadwal_kuliah j
-       LEFT JOIN dosen d ON d.id = j.dosen_id
-      WHERE j.mahasiswa_id = ? AND j.hari = ?
-      ORDER BY j.jam_mulai`,
-    [mahasiswaId, hari],
   );
 }
 

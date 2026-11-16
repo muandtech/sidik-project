@@ -617,7 +617,10 @@ Implementasi saat ini berbeda dari rekomendasi PRD §3.1 di beberapa titik. Samp
 | Database | PostgreSQL | MySQL 8 / MariaDB | Perlu keputusan tim |
 | Backend | NestJS/Laravel, REST + OpenAPI | Next.js Server Actions (fullstack) | Perlu keputusan; Integration API (§18) tetap butuh REST + OpenAPI |
 | Pemisahan sistem | SIDIK & E-Learning: aplikasi & DB terpisah (NFR-15) | Baru SIDIK | E-Learning dibangun sebagai aplikasi terpisah |
-| Model role | 7+ peran (§10), satu orang bisa banyak peran | Satu kolom `role` (4 nilai) | Harus diubah sebelum modul Kaprodi/BAAK |
+| Model role | 7+ peran (§10), satu orang bisa banyak peran | Tabel `user_roles` (7 role) + role aktif per session | ✅ 2026-11-16. Izin per menu/aksi yang bisa diatur Superadmin (SD-S2-01) belum |
+| Status akademik & akses | — | Aktif penuh; cuti/nonaktif lihat saja; lulus/keluar ditolak | ✅ Keputusan kampus 2026-11-16 |
+| Mata kuliah diulang | — | Pengaturan `ipk_nilai_ulang` (default `terbaik`) | Perlu konfirmasi BAAK |
+| Mengambil MK semester di atasnya | — | Diizinkan bila prasyarat lulus & dalam batas SKS | Perlu konfirmasi BAAK |
 | Rate limit store | — | Tabel `login_gagal` (MySQL) | ✅ 2026-11-10; pindah ke Redis bila load test menunjukkan perlu |
 | Target RPO/RTO | PRD 24 jam/4 jam vs Blueprint 15 menit/2 jam | — | Perlu persetujuan kampus |
 | Kerangka test | NFR-12 ≥ 70% modul kritis | Vitest 4 + DB `sidik_test` | ✅ 2026-11-10; cakupan modul kritis belum tercapai |

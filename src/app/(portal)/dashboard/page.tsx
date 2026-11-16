@@ -11,9 +11,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Card, CardHeader, CardLink, EmptyState, MenuButtons, PageHeader } from "@/components/ui";
+import { getJadwalHari } from "@/lib/akademik";
 import {
   getAktivitas,
-  getJadwalHari,
   getMahasiswa,
   getNotifikasiBelumDibaca,
   getPengumumanList,
@@ -117,14 +117,14 @@ export default async function DashboardPage() {
               ) : (
                 jadwal.map((item) => (
                   <div
-                    key={item.id}
+                    key={item.jadwal_id}
                     className="flex items-center gap-4 rounded-md border border-line bg-canvas/80 px-3 py-2.5 sm:gap-6"
                   >
                     <span className="w-12 shrink-0 text-sm font-semibold text-gray-600">{formatJam(item.jam_mulai)}</span>
                     <div className="min-w-0">
                       <p className="truncate text-[15px] font-semibold text-ink">{item.nama_mk}</p>
                       <p className="truncate text-xs text-muted">
-                        {item.ruang} • {orDash(item.dosen)} • s.d. {formatJam(item.jam_selesai)}
+                        {orDash(item.ruang)} • {orDash(item.dosen)} • s.d. {formatJam(item.jam_selesai)}
                       </p>
                     </div>
                   </div>

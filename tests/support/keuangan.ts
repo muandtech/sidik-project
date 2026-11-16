@@ -1,5 +1,6 @@
 import type { ExecuteValues, ResultSetHeader } from "mysql2/promise";
 import { db, queryOne } from "@/lib/db";
+import type { Role } from "@/lib/peran";
 
 // Data uji fiktif untuk modul keuangan. Setiap tagihan dibuat untuk mahasiswa baru supaya test tidak saling
 // bergantung (audit_log append-only, jadi test tidak menghapus data melainkan memakai id masing-masing).
@@ -11,7 +12,7 @@ async function sisip(sql: string, params: ExecuteValues[]) {
   return hasil.insertId;
 }
 
-async function prodiUji() {
+export async function prodiUji() {
   await db.execute("INSERT IGNORE INTO fakultas (kode, nama) VALUES ('FUJI', 'Fakultas Uji')");
   const fakultas = await queryOne<{ id: number }>("SELECT id FROM fakultas WHERE kode = 'FUJI'");
   if (!fakultas) throw new Error("Fakultas uji gagal dibuat");
@@ -23,14 +24,17 @@ async function prodiUji() {
   return prodi.id;
 }
 
-export async function buatUser(role: "mahasiswa" | "keuangan" = "mahasiswa") {
+export async function buatUser(...roles: Role[]) {
   urut += 1;
   const username = `uji${Date.now() % 1e7}${urut}`;
-  return sisip("INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, 'x', ?)", [
+  const userId = await sisip("INSERT INTO users (username, email, password_hash) VALUES (?, ?, 'x')", [
     username,
     `${username}@uji.test`,
-    role,
   ]);
+  for (const role of roles.length > 0 ? roles : (["mahasiswa"] as const)) {
+    await db.execute("INSERT INTO user_roles (user_id, role) VALUES (?, ?)", [userId, role]);
+  }
+  return userId;
 }
 
 export type OpsiTagihan = {

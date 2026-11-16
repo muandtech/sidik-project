@@ -211,7 +211,7 @@ describe("Hak akses Server Action (RBAC, anti-IDOR)", () => {
   }
 
   it("mahasiswa tidak bisa ACC walau memanggil action langsung", async () => {
-    sesi.user = { userId: await buatUser("mahasiswa"), username: "m", email: "m@uji.test", role: "mahasiswa", nama: "M" };
+    sesi.user = { userId: await buatUser("mahasiswa"), username: "m", email: "m@uji.test", role: "mahasiswa", roles: ["mahasiswa"], nama: "M" };
     const { tagihanId, hasil } = await kirimAcc();
     expect(hasil).toEqual({ error: "Hanya Admin Keuangan yang dapat mengubah tagihan." });
     expect((await termin(tagihanId))[0].status).toBe("belum_bayar");
@@ -220,7 +220,7 @@ describe("Hak akses Server Action (RBAC, anti-IDOR)", () => {
   it("tanpa login ditolak; Admin Keuangan berhasil", async () => {
     expect((await kirimAcc()).hasil.error).toBeDefined();
 
-    sesi.user = { userId: adminKeuangan, username: "k", email: "k@uji.test", role: "keuangan", nama: "K" };
+    sesi.user = { userId: adminKeuangan, username: "k", email: "k@uji.test", role: "keuangan", roles: ["keuangan"], nama: "K" };
     const { tagihanId, hasil } = await kirimAcc();
     expect(hasil.sukses).toContain("berhasil di-ACC");
     expect((await termin(tagihanId))[0].status).toBe("lunas");

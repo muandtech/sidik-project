@@ -12,7 +12,9 @@ SET time_zone = '+07:00';
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS menu, fitur, pengaturan, tagihan_termin, tagihan, aktivitas, notifikasi, pengumuman,
   kategori_pengumuman, jadwal_kuliah, dokumen_mahasiswa, orang_tua_wali, mahasiswa, dosen,
-  prodi, fakultas, audit_log, sessions, users, login_gagal, captcha_terpakai;
+  prodi, fakultas, audit_log, sessions, users, login_gagal, captcha_terpakai,
+  user_roles, nilai, krs_detail, krs, jadwal, kelas, ruang, prasyarat_mk, mata_kuliah, kurikulum,
+  tahun_akademik, bobot_nilai, batas_sks;
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ---------------------------------------------------------------------
@@ -39,7 +41,8 @@ CREATE TABLE fitur (
 -- Semua menu & tombol aksi portal. Item induk sidebar (punya submenu) tidak memiliki fitur_slug.
 CREATE TABLE menu (
   id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  grup        ENUM('menu_atas','sidebar','menu_pengguna','aksi_dashboard','aksi_cepat','aksi_biodata','aksi_keuangan') NOT NULL,
+  grup        ENUM('menu_atas','sidebar','menu_pengguna','aksi_dashboard','aksi_cepat','aksi_biodata','aksi_keuangan','staf') NOT NULL,
+  roles       SET('dosen','kaprodi','baak','keuangan','pimpinan','superadmin') NULL COMMENT 'Grup staf: role yang melihat menu ini',
   parent_id   INT UNSIGNED NULL,
   label       VARCHAR(80)  NOT NULL,
   ikon        VARCHAR(40)  NULL COMMENT 'Nama ikon lucide, mis. House, Wallet',
@@ -60,16 +63,27 @@ CREATE TABLE users (
   username      VARCHAR(50)  NOT NULL UNIQUE COMMENT 'NIM / NIDN',
   email         VARCHAR(120) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
-  role          ENUM('mahasiswa','dosen','keuangan','admin') NOT NULL DEFAULT 'mahasiswa',
   nama          VARCHAR(120) NULL COMMENT 'Nama tampilan akun staf yang tidak punya profil mahasiswa/dosen',
   status        ENUM('aktif','nonaktif') NOT NULL DEFAULT 'aktif',
   last_login    DATETIME NULL,
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+-- RBAC (PRD §10, SD-S2-01): satu pengguna dapat memiliki beberapa role dan berpindah role aktif.
+-- Dosen PA bukan role tersendiri: dosen yang ditunjuk di mahasiswa.dosen_pa_id.
+CREATE TABLE user_roles (
+  user_id   INT UNSIGNED NOT NULL,
+  role      ENUM('mahasiswa','dosen','kaprodi','baak','keuangan','pimpinan','superadmin') NOT NULL,
+  prodi_id  INT UNSIGNED NULL COMMENT 'Lingkup prodi untuk role kaprodi',
+  PRIMARY KEY (user_id, role),
+  INDEX idx_user_roles_role (role),
+  CONSTRAINT fk_user_roles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 CREATE TABLE sessions (
   id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id     INT UNSIGNED NOT NULL,
+  role_aktif  ENUM('mahasiswa','dosen','kaprodi','baak','keuangan','pimpinan','superadmin') NOT NULL,
   token_hash  CHAR(64)     NOT NULL UNIQUE COMMENT 'SHA-256 dari token cookie',
   expires_at  DATETIME     NOT NULL,
   ip_address  VARCHAR(45)  NULL,
@@ -166,7 +180,11 @@ CREATE TABLE mahasiswa (
   angkatan         YEAR         NOT NULL,
   semester         TINYINT UNSIGNED NOT NULL DEFAULT 1,
   dosen_pa_id      INT UNSIGNED NULL,
-  status_akademik  ENUM('aktif','cuti','nonaktif','lulus') NOT NULL DEFAULT 'aktif',
+  -- Aturan akses (keputusan kampus 2026-11-16): aktif = penuh; cuti & nonaktif = boleh login, lihat saja,
+  -- tidak bisa KRS; lulus & keluar = tidak bisa login sebagai mahasiswa.
+  status_akademik  ENUM('aktif','cuti','nonaktif','lulus','keluar') NOT NULL DEFAULT 'aktif',
+  -- Sprint 2-3: izin mengisi KRS diatur manual oleh Admin Keuangan (PRD 21.4); otomatis dari pembayaran di Sprint 4.
+  boleh_krs        TINYINT(1)   NOT NULL DEFAULT 0,
   tempat_lahir     VARCHAR(60)  NULL,
   tanggal_lahir    DATE         NULL,
   jenis_kelamin    ENUM('L','P') NULL,
@@ -178,11 +196,11 @@ CREATE TABLE mahasiswa (
   alamat_ktp       VARCHAR(255) NULL,
   alamat_domisili  VARCHAR(255) NULL,
   foto             VARCHAR(255) NULL COMMENT 'Path relatif di /public',
-  total_sks        SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'SKS lulus nilai A/B/C',
-  ipk              DECIMAL(3,2) NULL,
   nilai_tilawah    VARCHAR(5)   NULL,
   CONSTRAINT fk_mhs_user  FOREIGN KEY (user_id)     REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_mhs_prodi FOREIGN KEY (prodi_id)    REFERENCES prodi(id),
+  INDEX idx_mhs_pa (dosen_pa_id),
+  INDEX idx_mhs_prodi_status (prodi_id, status_akademik),
   CONSTRAINT fk_mhs_pa    FOREIGN KEY (dosen_pa_id) REFERENCES dosen(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
@@ -207,22 +225,158 @@ CREATE TABLE dokumen_mahasiswa (
   CONSTRAINT fk_dok_mhs FOREIGN KEY (mahasiswa_id) REFERENCES mahasiswa(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Jadwal sederhana untuk widget "Agenda Hari Ini".
--- Sprint 2 akan menggantinya dengan kelas/jadwal hasil KRS.
-CREATE TABLE jadwal_kuliah (
+-- ---------------------------------------------------------------------
+-- SIAKAD (PRD 6.3, Sprint 2)
+-- ---------------------------------------------------------------------
+
+-- Semester & kalender akademik (FR-AK-04). Hanya satu semester aktif (kolom aktif_unik).
+CREATE TABLE tahun_akademik (
+  id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  kode               CHAR(5)     NOT NULL UNIQUE COMMENT 'mis. 20261 = 2026/2027 Ganjil',
+  tahun              VARCHAR(9)  NOT NULL COMMENT 'mis. 2026/2027',
+  periode            ENUM('Ganjil','Genap') NOT NULL,
+  aktif              TINYINT(1)  NOT NULL DEFAULT 0,
+  aktif_unik         TINYINT(1)  AS (IF(aktif = 1, 1, NULL)) STORED,
+  krs_mulai          DATE NULL,
+  krs_selesai        DATE NULL,
+  perubahan_mulai    DATE NULL COMMENT 'Masa tambah/batal KRS',
+  perubahan_selesai  DATE NULL,
+  kuliah_mulai       DATE NULL,
+  kuliah_selesai     DATE NULL,
+  uts_mulai          DATE NULL,
+  uts_selesai        DATE NULL,
+  uas_mulai          DATE NULL,
+  uas_selesai        DATE NULL,
+  nilai_mulai        DATE NULL COMMENT 'Periode input nilai',
+  nilai_selesai      DATE NULL,
+  UNIQUE KEY uq_ta_aktif (aktif_unik),
+  UNIQUE KEY uq_ta_tahun_periode (tahun, periode)
+) ENGINE=InnoDB;
+
+-- Kurikulum per prodi, berlaku untuk angkatan >= angkatan_mulai (FR-AK-02).
+CREATE TABLE kurikulum (
+  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  prodi_id        INT UNSIGNED NOT NULL,
+  kode            VARCHAR(20)  NOT NULL UNIQUE,
+  nama            VARCHAR(120) NOT NULL,
+  angkatan_mulai  YEAR         NOT NULL,
+  aktif           TINYINT(1)   NOT NULL DEFAULT 1,
+  CONSTRAINT fk_kurikulum_prodi FOREIGN KEY (prodi_id) REFERENCES prodi(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE mata_kuliah (
   id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  mahasiswa_id  INT UNSIGNED NOT NULL,
-  kode_mk       VARCHAR(15)  NOT NULL,
-  nama_mk       VARCHAR(120) NOT NULL,
-  sks           TINYINT UNSIGNED NOT NULL DEFAULT 2,
-  dosen_id      INT UNSIGNED NULL,
-  ruang         VARCHAR(40)  NOT NULL,
-  hari          TINYINT UNSIGNED NOT NULL COMMENT '1=Senin ... 7=Minggu',
-  jam_mulai     TIME NOT NULL,
-  jam_selesai   TIME NOT NULL,
-  INDEX idx_jadwal_hari (mahasiswa_id, hari),
-  CONSTRAINT fk_jadwal_mhs   FOREIGN KEY (mahasiswa_id) REFERENCES mahasiswa(id) ON DELETE CASCADE,
-  CONSTRAINT fk_jadwal_dosen FOREIGN KEY (dosen_id)     REFERENCES dosen(id) ON DELETE SET NULL
+  kurikulum_id  INT UNSIGNED NOT NULL,
+  kode          VARCHAR(15)  NOT NULL,
+  nama          VARCHAR(120) NOT NULL,
+  sks           TINYINT UNSIGNED NOT NULL,
+  semester      TINYINT UNSIGNED NOT NULL COMMENT 'Semester anjuran dalam kurikulum',
+  jenis         ENUM('wajib','pilihan') NOT NULL DEFAULT 'wajib',
+  aktif         TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'Data yang sudah dipakai dinonaktifkan, bukan dihapus',
+  UNIQUE KEY uq_mk_kurikulum (kurikulum_id, kode),
+  CONSTRAINT fk_mk_kurikulum FOREIGN KEY (kurikulum_id) REFERENCES kurikulum(id)
+) ENGINE=InnoDB;
+
+-- BR-SD-04: mata kuliah hanya dapat diambil bila prasyaratnya lulus (nilai minimal di pengaturan).
+CREATE TABLE prasyarat_mk (
+  mata_kuliah_id  INT UNSIGNED NOT NULL,
+  prasyarat_id    INT UNSIGNED NOT NULL,
+  PRIMARY KEY (mata_kuliah_id, prasyarat_id),
+  CONSTRAINT fk_prasyarat_mk  FOREIGN KEY (mata_kuliah_id) REFERENCES mata_kuliah(id) ON DELETE CASCADE,
+  CONSTRAINT fk_prasyarat_req FOREIGN KEY (prasyarat_id)   REFERENCES mata_kuliah(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE ruang (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  kode       VARCHAR(20)  NOT NULL UNIQUE,
+  nama       VARCHAR(80)  NOT NULL,
+  kapasitas  SMALLINT UNSIGNED NOT NULL
+) ENGINE=InnoDB;
+
+-- Kelas yang ditawarkan pada satu semester (FR-AK-05). `terisi` dinaikkan secara atomik saat KRS diajukan.
+CREATE TABLE kelas (
+  id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tahun_akademik_id  INT UNSIGNED NOT NULL,
+  mata_kuliah_id     INT UNSIGNED NOT NULL,
+  nama               VARCHAR(5)   NOT NULL COMMENT 'A, B, ...',
+  dosen_id           INT UNSIGNED NULL,
+  kuota              SMALLINT UNSIGNED NOT NULL,
+  terisi             SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_kelas (tahun_akademik_id, mata_kuliah_id, nama),
+  INDEX idx_kelas_dosen (dosen_id, tahun_akademik_id),
+  CONSTRAINT ck_kelas_kuota CHECK (terisi <= kuota),
+  CONSTRAINT fk_kelas_ta    FOREIGN KEY (tahun_akademik_id) REFERENCES tahun_akademik(id),
+  CONSTRAINT fk_kelas_mk    FOREIGN KEY (mata_kuliah_id)    REFERENCES mata_kuliah(id),
+  CONSTRAINT fk_kelas_dosen FOREIGN KEY (dosen_id)          REFERENCES dosen(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE jadwal (
+  id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  kelas_id     INT UNSIGNED NOT NULL,
+  hari         TINYINT UNSIGNED NOT NULL COMMENT '1=Senin ... 7=Minggu',
+  jam_mulai    TIME NOT NULL,
+  jam_selesai  TIME NOT NULL,
+  ruang_id     INT UNSIGNED NULL,
+  INDEX idx_jadwal_kelas (kelas_id),
+  INDEX idx_jadwal_ruang (ruang_id, hari),
+  CONSTRAINT fk_jadwal_kelas FOREIGN KEY (kelas_id) REFERENCES kelas(id) ON DELETE CASCADE,
+  CONSTRAINT fk_jadwal_ruang FOREIGN KEY (ruang_id) REFERENCES ruang(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- BR-SD-01: satu KRS per mahasiswa per tahun akademik.
+CREATE TABLE krs (
+  id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  mahasiswa_id       INT UNSIGNED NOT NULL,
+  tahun_akademik_id  INT UNSIGNED NOT NULL,
+  status             ENUM('draf','diajukan','disetujui','ditolak') NOT NULL DEFAULT 'draf',
+  maks_sks           TINYINT UNSIGNED NOT NULL COMMENT 'Batas SKS saat KRS dibuat (BR-SD-03)',
+  ips_acuan          DECIMAL(3,2) NULL COMMENT 'IPS semester sebelumnya; NULL = paket semester 1',
+  catatan_pa         VARCHAR(255) NULL,
+  diajukan_at        DATETIME NULL,
+  diputuskan_at      DATETIME NULL,
+  diputuskan_oleh    INT UNSIGNED NULL,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_krs (mahasiswa_id, tahun_akademik_id),
+  INDEX idx_krs_ta_status (tahun_akademik_id, status),
+  CONSTRAINT fk_krs_mhs   FOREIGN KEY (mahasiswa_id)      REFERENCES mahasiswa(id) ON DELETE CASCADE,
+  CONSTRAINT fk_krs_ta    FOREIGN KEY (tahun_akademik_id) REFERENCES tahun_akademik(id),
+  CONSTRAINT fk_krs_oleh  FOREIGN KEY (diputuskan_oleh)   REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE krs_detail (
+  id        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  krs_id    INT UNSIGNED NOT NULL,
+  kelas_id  INT UNSIGNED NOT NULL,
+  UNIQUE KEY uq_krs_detail (krs_id, kelas_id),
+  INDEX idx_krs_detail_kelas (kelas_id),
+  CONSTRAINT fk_krsd_krs   FOREIGN KEY (krs_id)   REFERENCES krs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_krsd_kelas FOREIGN KEY (kelas_id) REFERENCES kelas(id)
+) ENGINE=InnoDB;
+
+-- Nilai resmi per mata kuliah. BR-SD-06: hanya nilai terpublikasi yang tampil di KHS.
+CREATE TABLE nilai (
+  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  krs_detail_id   INT UNSIGNED NOT NULL UNIQUE,
+  nilai_angka     DECIMAL(5,2) NULL,
+  nilai_huruf     VARCHAR(2)   NOT NULL,
+  bobot           DECIMAL(3,2) NOT NULL,
+  status          ENUM('draf','terpublikasi') NOT NULL DEFAULT 'draf',
+  dipublikasi_at  DATETIME NULL,
+  CONSTRAINT fk_nilai_krsd FOREIGN KEY (krs_detail_id) REFERENCES krs_detail(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Konversi nilai huruf → bobot mutu (FR-AK-14, dapat dikonfigurasi).
+CREATE TABLE bobot_nilai (
+  huruf      VARCHAR(2)   PRIMARY KEY,
+  nilai_min  DECIMAL(5,2) NOT NULL COMMENT 'Nilai angka minimal untuk huruf ini',
+  bobot      DECIMAL(3,2) NOT NULL,
+  lulus      TINYINT(1)   NOT NULL COMMENT '1 = SKS dihitung lulus'
+) ENGINE=InnoDB;
+
+-- BR-SD-03: batas SKS berdasarkan IPS semester sebelumnya (dikonfigurasi BAAK).
+CREATE TABLE batas_sks (
+  ips_min   DECIMAL(3,2) PRIMARY KEY,
+  maks_sks  TINYINT UNSIGNED NOT NULL
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------

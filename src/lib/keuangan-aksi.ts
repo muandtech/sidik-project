@@ -4,6 +4,7 @@ import { catatAudit, type NilaiAudit } from "@/lib/audit";
 import type { Tagihan, Termin } from "@/lib/data";
 import { queryDalam, withTransaction } from "@/lib/db";
 import { formatBulan, formatRupiah, tanggalHariIniWib } from "@/lib/format";
+import { GagalAksi } from "@/lib/gagal-aksi";
 import { keteranganAuditTagihan } from "@/lib/keuangan";
 import { getPengaturan } from "@/lib/konfigurasi";
 
@@ -12,8 +13,7 @@ import { getPengaturan } from "@/lib/konfigurasi";
 // Setiap operasi: satu transaksi, baris tagihan & termin dikunci (FOR UPDATE) agar ACC ganda tidak mungkin,
 // dan audit + notifikasi ditulis dalam transaksi yang sama.
 
-/** Kesalahan yang pesannya aman ditampilkan ke Admin Keuangan. */
-export class GagalAksi extends Error {}
+export { GagalAksi };
 
 export type DataPembayaran = { tanggal: string; metode: string; catatan: string | null };
 

@@ -84,3 +84,18 @@ export const getMenu = cache(async (grup: MenuGrup): Promise<MenuItem[]> => {
     // Abaikan entri yang tidak punya tujuan (fitur tidak terdaftar dan tanpa submenu).
     .filter((item) => item.href || item.children.length > 0);
 });
+
+export type MenuStaf = { id: number; label: string; ikon: string | null; href: string };
+
+/** Menu portal staf untuk role aktif (kolom `menu.roles`); fitur yang belum tersedia → halaman /staf/segera. */
+export const getMenuStaf = cache(async (role: string): Promise<MenuStaf[]> =>
+  query<MenuStaf>(
+    `SELECT m.id, m.label, m.ikon,
+            CASE WHEN f.status = 'tersedia' AND f.rute IS NOT NULL THEN f.rute ELSE CONCAT('/staf/segera/', f.slug) END AS href
+       FROM menu m
+       JOIN fitur f ON f.slug = m.fitur_slug
+      WHERE m.grup = 'staf' AND m.aktif = 1 AND FIND_IN_SET(?, m.roles)
+      ORDER BY m.urutan, m.id`,
+    [role],
+  ),
+);

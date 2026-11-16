@@ -32,6 +32,8 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactCompiler: true,
   poweredByHeader: false,
+  // forbidden() untuk respons HTTP 403 (SD-S2-01). Eksperimental di Next.js 16.
+  experimental: { authInterrupts: true },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

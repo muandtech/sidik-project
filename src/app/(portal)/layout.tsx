@@ -1,5 +1,6 @@
 import { logout } from "@/app/actions/auth";
 import { PortalShell } from "@/components/portal/portal-shell";
+import { formatIp, getRingkasanStudi } from "@/lib/akademik";
 import { getMahasiswa } from "@/lib/data";
 import { inisial } from "@/lib/format";
 import { getMenu, getPengaturan } from "@/lib/konfigurasi";
@@ -15,8 +16,10 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
     getMenu("menu_pengguna"),
   ]);
 
+  const studi = mahasiswa ? await getRingkasanStudi(mahasiswa.id) : null;
+
   // Akun mahasiswa tanpa data profil tidak bisa memakai portal (jangan redirect ke /login agar tidak berputar).
-  if (!mahasiswa) {
+  if (!mahasiswa || !studi) {
     return (
       <main className="grid min-h-screen place-items-center px-4">
         <div className="max-w-md rounded-xl border border-line bg-white p-6 text-center">
@@ -37,7 +40,7 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
   return (
     <PortalShell
       user={{ nama: mahasiswa.nama, nomorInduk: mahasiswa.nim, inisial: inisial(mahasiswa.nama) }}
-      stats={{ totalSks: mahasiswa.total_sks, ipk: mahasiswa.ipk, nilaiTilawah: mahasiswa.nilai_tilawah }}
+      stats={{ totalSks: studi.sksLulus, ipk: studi.ipk === null ? null : formatIp(studi.ipk), nilaiTilawah: mahasiswa.nilai_tilawah }}
       menus={{ atas: menuAtas, sidebar, pengguna: menuPengguna }}
       branding={{
         judul: pengaturan.judul_portal,

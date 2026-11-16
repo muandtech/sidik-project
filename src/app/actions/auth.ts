@@ -9,7 +9,17 @@ import { db, queryOne } from "@/lib/db";
 import { catatLoginGagal, getAturanBatasLogin, resetLoginGagal, sisaKunciLogin } from "@/lib/batas-login";
 import { CAPTCHA_COOKIE, verifikasiCaptcha } from "@/lib/captcha";
 import { getPengaturan } from "@/lib/konfigurasi";
-import { createSession, deleteSession, getClientInfo, getSessionUser, homeFor, type Role } from "@/lib/session";
+import { isRole } from "@/lib/peran";
+import {
+  akhiriSessionLain,
+  createSession,
+  deleteSession,
+  gantiRoleAktif,
+  getClientInfo,
+  getRoleTersedia,
+  getSessionUser,
+  homeFor,
+} from "@/lib/session";
 
 export type LoginState = {
   message?: string;
@@ -67,8 +77,8 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     };
   }
 
-  const user = await queryOne<{ id: number; password_hash: string; role: Role; status: string }>(
-    "SELECT id, password_hash, role, status FROM users WHERE username = ? OR email = ? LIMIT 1",
+  const user = await queryOne<{ id: number; password_hash: string; status: string }>(
+    "SELECT id, password_hash, status FROM users WHERE username = ? OR email = ? LIMIT 1",
     [identifier, identifier.toLowerCase()],
   );
   const passwordValid = await bcrypt.compare(password, user?.password_hash ?? (await getDummyHash()));
@@ -89,12 +99,68 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     };
   }
 
-  await resetLoginGagal(identifier);
-  await createSession(user.id, remember);
-  await db.execute("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
-  await audit(user.id, "login_sukses");
+  // Mahasiswa lulus/keluar tidak punya role yang boleh dipakai (keputusan kampus 2026-11-16).
+  const roles = await getRoleTersedia(user.id);
+  const roleAwal = roles[0];
+  if (!roleAwal) {
+    await audit(user.id, "login_gagal", "tidak ada role yang boleh dipakai (status akademik/role)");
+    const pengaturan = await getPengaturan();
+    return {
+      message: `${pengaturan.pesan_status_mahasiswa_ditolak ?? "Akun Anda tidak dapat masuk ke portal."} Hubungi ${pengaturan.unit_layanan_akun ?? "admin"} bila ada kekeliruan.`,
+      identifier,
+      attempt: Date.now(),
+    };
+  }
 
-  redirect(homeFor(user.role));
+  await resetLoginGagal(identifier);
+  await createSession(user.id, remember, roleAwal);
+  await db.execute("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
+  await audit(user.id, "login_sukses", `role aktif: ${roleAwal}`);
+
+  redirect(homeFor(roleAwal));
+}
+
+/** Berpindah role aktif (SD-S2-01). Role tujuan diperiksa ulang di server. */
+export async function gantiRole(formData: FormData) {
+  const role = String(formData.get("role") ?? "");
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  if (!isRole(role) || !(await gantiRoleAktif(role))) {
+    await audit(user.userId, "akses_ditolak", `ganti role ke ${role.slice(0, 20)}`);
+    redirect(homeFor(user.role));
+  }
+  await audit(user.userId, "ganti_role", `${user.role} → ${role}`);
+  redirect(homeFor(role));
+}
+
+export type GantiPasswordState = { error?: string; sukses?: string };
+
+/** Ganti password (SD-S2-04): password lama benar, kebijakan password baru, session lain diakhiri. */
+export async function gantiPassword(_prev: GantiPasswordState, formData: FormData): Promise<GantiPasswordState> {
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  const lama = String(formData.get("password_lama") ?? "");
+  const baru = String(formData.get("password_baru") ?? "");
+  const ulang = String(formData.get("password_ulang") ?? "");
+
+  const minimal = Number((await getPengaturan()).password_min_panjang) || 8;
+  if (baru.length < minimal || !/[A-Za-z]/.test(baru) || !/\d/.test(baru)) {
+    return { error: `Password baru minimal ${minimal} karakter dan berisi kombinasi huruf dan angka.` };
+  }
+  if (baru.length > 72) return { error: "Password baru maksimal 72 karakter." };
+  if (baru !== ulang) return { error: "Konfirmasi password baru tidak sama." };
+  if (baru === lama) return { error: "Password baru harus berbeda dari password lama." };
+
+  const akun = await queryOne<{ password_hash: string }>("SELECT password_hash FROM users WHERE id = ?", [user.userId]);
+  if (!akun || !(await bcrypt.compare(lama, akun.password_hash))) {
+    await audit(user.userId, "ganti_password_gagal", "password lama salah");
+    return { error: "Password lama salah." };
+  }
+
+  await db.execute("UPDATE users SET password_hash = ? WHERE id = ?", [await bcrypt.hash(baru, 10), user.userId]);
+  await akhiriSessionLain(user.userId);
+  await audit(user.userId, "ganti_password");
+  return { sukses: "Password berhasil diganti. Semua session di perangkat lain telah diakhiri." };
 }
 
 export async function logout() {

@@ -12,6 +12,7 @@ import {
   verifikasiTagihan,
   verifikasiTermin,
 } from "@/lib/keuangan-aksi";
+import { izinkanYangMemenuhiSyarat, setIzinKrs } from "@/lib/izin-krs";
 import { getSessionUser } from "@/lib/session";
 
 // Server Action Admin Keuangan: cek session/role → baca & validasi input → panggil src/lib/keuangan-aksi.ts.
@@ -93,4 +94,16 @@ export async function pecahCicilan(_prev: AksiState, formData: FormData): Promis
 /** Menggabungkan kembali cicilan menjadi bayar sekaligus (BR-SD-15). */
 export async function gabungCicilan(_prev: AksiState, formData: FormData): Promise<AksiState> {
   return jalankan(async (userId) => gabungkanCicilan(idDari(formData, "tagihan_id"), userId));
+}
+
+/** Membuka/menutup izin KRS satu mahasiswa (PRD 21.4: manual oleh Admin Keuangan sampai Sprint 4). */
+export async function ubahIzinKrs(_prev: AksiState, formData: FormData): Promise<AksiState> {
+  return jalankan(async (userId) =>
+    setIzinKrs(idDari(formData, "mahasiswa_id"), formData.get("boleh") === "1", userId),
+  );
+}
+
+/** Membuka izin KRS untuk semua mahasiswa aktif yang memenuhi syarat pembayaran (BR-SD-02). */
+export async function izinkanMassal(): Promise<AksiState> {
+  return jalankan(async (userId) => izinkanYangMemenuhiSyarat(userId));
 }

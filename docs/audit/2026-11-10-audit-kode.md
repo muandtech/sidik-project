@@ -14,7 +14,7 @@ tidak ada rate limiting. Akibatnya, password akun dengan NIM berurutan bisa dite
 | Tingkat | Jumlah |
 | --- | --- |
 | 🔴 Tinggi | 3 (✅ semua diperbaiki) |
-| 🟠 Sedang | 9 (✅ S2–S7 diperbaiki, S9 sebagian; S1 & S8 menunggu keputusan kampus) |
+| 🟠 Sedang | 9 (✅ S1–S7 diperbaiki, S9 sebagian; S8 menunggu keputusan kampus) |
 | 🟡 Rendah | 8 (✅ R4, R7; R6 sebagian) |
 
 ## Status perbaikan
@@ -34,7 +34,7 @@ tidak ada rate limiting. Akibatnya, password akun dengan NIM berurutan bisa dite
 | R4 Role ditolak = 500 | ✅ 2026-11-10 | Action keuangan mengembalikan `{ error }` |
 | R6 Index | 🟡 sebagian | `tagihan (tahun_akademik, periode)`, `audit_log (aksi, created_at)`. `pengumuman` belum |
 | R7 Non-null assertion | ✅ 2026-11-10 | Termin dicari ulang setelah kunci; bila hilang → pesan "Termin tidak ditemukan." |
-| S1 Status akademik | ⏸ menunggu kampus | Kebijakan cuti/nonaktif/lulus (ditolak atau read-only) belum ada di PRD |
+| S1 Status akademik | ✅ 2026-11-16 | Keputusan kampus: aktif penuh; cuti & nonaktif login lihat saja (tanpa KRS); lulus & keluar ditolak. `getRoleTersedia()` di `src/lib/session.ts` (diperiksa ulang setiap request), `alasanKrsTerkunci()` di `src/lib/krs.ts` |
 | S8 Tagihan per semester | ⏸ menunggu kampus | PRD 6.4.1 saat ini memang menulis "Satu tagihan per mahasiswa per semester", jadi constraint sesuai PRD. Ubah PRD dulu bila Keuangan butuh tagihan lain (KKN, wisuda) |
 
 Verifikasi: `npm test` (50 lulus), `tsc`, `lint`, `build` lulus; uji end-to-end di server dev: login
